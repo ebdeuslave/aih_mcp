@@ -91,28 +91,6 @@ def getOrderDetails(store:str, id: int) -> dict|int:
         return response.status_code
     
 
-@mcp.tool()
-def getProductSupplier(id:int) -> str:
-    """
-     Get the product supplier
-    Args:
-        id: product id
-    Returns:
-        The supplier name
-    """
-    
-    url = f"https://parapharma.ma/api/products/{id}?output_format=JSON"
-
-    with httpx.Client(http2=True) as client:
-        response = client.get(url, auth=(API_KEY, ""))
-        
-        if response.status_code == 200:
-            supplier_id = response.json()["product"]["id_supplier"]
-            return getSupplierName(supplier_id)
-        
-        return response.status_code    
-    
-
 def getSupplierName(id) -> str:
     """
      Get the supplier name
@@ -131,19 +109,24 @@ def getSupplierName(id) -> str:
 
 
 @mcp.tool()
-def getSuppliers() -> list:
-    """Get all suppliers
+def getProductSupplier(id_product:int) -> str:
     """
-    suppliers = []
-    with httpx.Client(http2=True, headers=headers) as client:
-        url = "https://parapharma.ma/api/suppliers?output_format=JSON"
-        response = client.get(url, auth=(API_KEY, ""), headers=headers)
-        if response.status_code == 200:
-            ids = response.json()["suppliers"]
-            for id in ids:
-                suppliers.append(id)
+     Get the product supplier
+    Args:
+        id_product: product id
+    Returns:
+        The supplier name if 200 else response content
+    """
     
-    return suppliers
+    url = f"https://parapharma.ma/api/products/{id_product}?output_format=JSON"
+
+    with httpx.Client(http2=True) as client:
+        response = client.get(url, auth=(API_KEY, ""))
+        
+        if response.status_code != 200:
+            return response.content   
+        
+        return getSupplierName(response.json()["product"]["id_supplier"]) 
 
 
 @mcp.tool()
@@ -244,15 +227,29 @@ def connectionToDB(command:str) -> list|str:
 
 
 mcp.tool()
-def saveOrdersData() -> None:
+def saveProducts(store: str,from_date: str, to_date: str, from_time="00:00:00", payment:str="all", current_states:list=[2,3]) -> None:
     """
-    Get orders details from store via API then take products ids and names, quantities, and prices
+    Get orders details from store via API, and take products ids, names, quantities, and prices
     then fetch products from database by id_product and take id_supplier from each product
-    then fetch it from pp_suppliers table and get the supplier name
-    then create csv file for each supplier, name it supplierName_todayDate.csv and put their products, quantities and pricesb\n
-    NOTE: do not double the product name in the file , instead , add its quantity to previous one
-
+    then fetch it from pp_suppliers table (pp could be ps or other) and get the supplier name
+    then create a folder called "products" inside it create csv file for each supplier, name it supplierName_todayDate(YYYY-MM-DD).csv and put their products, quantities and pricesb\n
+    NOTE: do not double the product name in the file , instead , add its quantity to the same previous one
+        it is better to give a feedback about this point, Ex : "i found another PRODUCT_NAME i will add its quantity to the previous one"
+        
+    Args:
+        store: the given store name
+        from_date: The starting date (format: YYYY-MM-DD)
+        to_date: The ending date (format: YYYY-MM-DD) NOTE that the to_date is excluded
+        from_time: The starting time (format: "HH:MM:SS")
+        payment: payment mode (only cod and cmi, cod means cash on delivery, cmi means prepaid, all is the default means both)
+        current_states: list contains ids of orders status
+            list of status {ID:NAME} : { 2:"paiement accepte or received payment", 3: "preparation encours or not yet shipped"}
+            
+    Returns:
+        None
     """ 
+    
+    getOrders(store, from_date, to_date, from_time, payment,current_states)
         
 
 # resource
