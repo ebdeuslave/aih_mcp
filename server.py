@@ -22,7 +22,7 @@ available_stores = ["parapharma", "coinpara", "allopara", "parabio"]
 mcp = FastMCP("mcp_demo")
 
 @mcp.tool()
-def getOrders(store: str,from_date: str, to_date: str, from_time="00:00:00", payment:str="all", current_state:list=[]) -> list|int:
+def getOrders(store: str,from_date: str, to_date: str, from_time="00:00:00", payment:str="all", current_states:list=[2,3]) -> list|int:
     """
     Get the orders ids for a giving date
     Args:
@@ -31,8 +31,8 @@ def getOrders(store: str,from_date: str, to_date: str, from_time="00:00:00", pay
         to_date: The ending date (format: YYYY-MM-DD) NOTE that the to_date is excluded
         from_time: The starting time (format: "HH:MM:SS")
         payment: payment mode (only cod and cmi, cod means cash on delivery, cmi means prepaid, all is the default means both)
-        current_state: order current status
-        status
+        current_states: list contains ids of orders status
+            list of status {ID:NAME} : { 2:"paiement accepte or received payment", 3: "preparation encours or not yet shipped"}
     Returns:
         The list of orders ids
     """
@@ -48,11 +48,13 @@ def getOrders(store: str,from_date: str, to_date: str, from_time="00:00:00", pay
     if store == "parabio":
         store = "www.parabio"
 
-    url = f"https://{store}.ma/api/orders?filter[invoice_date]=[{from_date} {from_time},{to_date}]&output_format=JSON"
+    url = f"https://{store}.ma/api/orders?output_format=JSON&filter[invoice_date]=[{from_date} {from_time},{to_date}]"
 
     if payment != "all" and payment in available_payment:
-        url = f"https://{store}.ma/api/orders?filter[invoice_date]=[{from_date} {from_time},{to_date}]&filter[payment]=[{payment}]&output_format=JSON"
-  
+        url += "&filter[payment]=[{payment}]"
+
+    if current_states:
+        url += f"&filter[current_state]={current_states}"
 
     with httpx.Client(http2=True) as client:
         response = client.get(url, auth=(API_KEY, ""))
