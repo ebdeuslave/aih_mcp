@@ -17,12 +17,12 @@ headers = {
    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
 }
 
-available_stores = ["parapharma", "coinpara", "allopara", "parabio"]
+available_stores = os.getenv("stores")
 
 mcp = FastMCP("mcp_demo")
 
 @mcp.tool()
-def getOrders(store: str,from_date: str, to_date: str, from_time="00:00:00", payment:str="all", current_states:list=[2,3]) -> list|int:
+def getOrders(store: str,from_date: str, to_date: str, from_time="00:00:00", payment:str="all", current_states:list=[2,3]) -> list|int|str:
     """
     Get the orders ids for a giving date
     Args:
@@ -34,7 +34,7 @@ def getOrders(store: str,from_date: str, to_date: str, from_time="00:00:00", pay
         current_states: list contains ids of orders status
             list of status {ID:NAME} : { 2:"paiement accepte or received payment", 3: "preparation encours or not yet shipped"}
     Returns:
-        The list of orders ids
+        The list of orders ids if successed else a status code number or message
     """
     
     available_payment = {
@@ -45,8 +45,6 @@ def getOrders(store: str,from_date: str, to_date: str, from_time="00:00:00", pay
     if store not in available_stores:
         return f"Store {store} is not available"
 
-    if store == "parabio":
-        store = "www.parabio"
 
     url = f"https://{store}.ma/api/orders?output_format=JSON&filter[invoice_date]=[{from_date} {from_time},{to_date}]"
 
@@ -59,11 +57,11 @@ def getOrders(store: str,from_date: str, to_date: str, from_time="00:00:00", pay
     with httpx.Client(http2=True) as client:
         response = client.get(url, auth=(API_KEY, ""))
         
-        if response.status_code == 200:
-            return response.json()["orders"]
+        if response.status_code != 200:
+            return response.status_code
+            
+        return response.json()["orders"]
         
-        return response.status_code
-    
     
 @mcp.tool()
 def getOrderDetails(store:str, id: int) -> dict|int:
@@ -213,7 +211,7 @@ def connectionToDB(command:str) -> list|str:
     """
     Connection to mysql database and fetch data\n
     **IMPORTANT**:
-        DO NOT USE ANY COMMAND THAT CHANGE RECORDS IN THE DATABASE USE FETCH REQUESTS ONLY
+        DO NOT TRY TO USE ANY COMMAND THAT UPDATE/DELETE RECORDS BECAUSE YOU CANNOT, YOU ARE ALLOWED TO ONLY FETCH DATA
     Args:
         command: the command to run in mysql (IMPORTANT: DO NOT END COMMAND WITH ";" MYSQL CONNECTOR HANDLES THAT AUTOMATICALY)
     Returns:
