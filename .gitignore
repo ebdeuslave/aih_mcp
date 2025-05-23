@@ -13,4 +13,5 @@ test.py
 .cursorignore
 .python-version
 .DS_Store
+.vscode
 
