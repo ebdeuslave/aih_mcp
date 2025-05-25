@@ -5,9 +5,10 @@ from PrestashopAPI import PrestashopAPI
 from utils import createProductsFile
 import requests
 import os
-
 from dotenv import load_dotenv
+
 load_dotenv()
+
 API_KEY = os.getenv("api_key")
 SECURE_KEY = os.getenv("secure_key")
 available_stores = os.getenv("stores")
