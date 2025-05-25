@@ -1,165 +1,13 @@
 from fastmcp import FastMCP
-import httpx
 import os
 import webbrowser
 import mysql.connector
 from mysql.connector import Error
-from dotenv import load_dotenv
-from datetime import datetime
-import csv
-import time
+from utils import createCSVFile
+from fetch_from_api import *
 
-
-load_dotenv()
-API_KEY = os.getenv("api_key")
-SECURE_KEY = os.getenv("secure_key")
-available_stores = os.getenv("stores")
-headers = {
-   "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
-}
 
 mcp = FastMCP("aih_mcp")
-
-@mcp.tool()
-def getOrders(store: str,from_date: str, to_date: str, status:list, from_time="00:00:00", payment:str="all") -> dict:
-    """
-    Get the orders ids for a giving date via API
-    Args:
-        store: the given store name
-        from_date: The starting date (format: YYYY-MM-DD)
-        to_date: The ending date (format: YYYY-MM-DD) NOTE that the to_date is excluded in result therefor you need to add 1 day to it
-        from_time: The starting time (format: "HH:MM:SS")
-        payment: payment mode (only cod and cmi, cod means cash on delivery, cmi means prepaid, all is the default means both)
-        status: list contains ids of orders status
-            Ex : [2,3] { 2:"paiement accepte or received payment", 3: "preparation encours or not yet shipped"}
-    Returns:
-        Dict contains hasError and content keys, if successed hasError=False content=list of orders ids else hasError=True and content=error message
-    """
-    
-    available_payment = {
-        "cod": "Paiement comptant à la livraison (Cash on delivery)",
-        "cmi": "cmi"
-    }
-
-    if store not in available_stores:
-        return {
-            "hasError": True,
-            "content": f"Store {store} not found"
-        }
-
-
-    url = f"https://{store}.ma/api/orders?output_format=JSON&filter[invoice_date]=[{from_date} {from_time},{to_date}]"
-
-    if payment != "all" and payment in available_payment:
-        url += "&filter[payment]=[{payment}]"
-
-    if status:
-        url += f"&filter[current_state]={status}"
-
-    with httpx.Client(http2=True) as client:
-        response = client.get(url, auth=(API_KEY, ""))
-        
-        if response.status_code != 200:
-            return {
-                "hasError": True,
-                "content": response.content
-            }
-            
-        return {
-            "hasError": False,
-            "content": response.json()["orders"]
-        }
-        
-    
-@mcp.tool()
-def getOrderDetails(store:str, id: int) -> dict:
-    """
-     Get the order details via API
-    Args:
-        store: the given store name
-        id: order id
-    Returns:
-        dict contains hasError and content keys, if successed hasError=False content=order details else hasError=True and content=error message
-    """
-    
-    if store not in available_stores:
-        return {
-            "hasError": True,
-            "content": f"Store {store} not found"
-        }
-
-    url = f"https://{store}.ma/api/orders/{id}?output_format=JSON"
-
-    with httpx.Client(http2=True) as client:
-        response = client.get(url, auth=(API_KEY, ""))
-        
-        if response.status_code != 200:
-            return {
-                "hasError": True,
-                "content": response.content
-            }
-        
-        return {
-            "hasError": False,
-            "content": response.json()["order"]
-        }
-        
-
-def getSupplierName(id) -> dict:
-    """
-    Get the supplier name
-    Args:
-        id: supplier id
-    Returns:
-        The supplier name
-    """
-    with httpx.Client(http2=True, headers=headers) as client:
-        url = f"https://parapharma.ma/api/suppliers/{id}?output_format=JSON"
-        response = client.get(url, auth=(API_KEY, ""), headers=headers)
-        if response.status_code != 200:
-            return {
-                "hasError": True,
-                "content": response.content
-            }
-        return {
-            "hasError": False,
-            "content": response.json()["supplier"]["name"]
-        }
-
-
-@mcp.tool()
-def getProductSupplier(id_product:int) -> dict:
-    """
-     Get the product supplier
-    Args:
-        id_product: product id
-    Returns:
-        dict contains hasError and content keys, if successed hasError=False content=supplier name else hasError=True and content=error message
-    """
-    
-    url = f"https://parapharma.ma/api/products/{id_product}?output_format=JSON"
-
-    with httpx.Client(http2=True) as client:
-        response = client.get(url, auth=(API_KEY, ""))
-        
-        if response.status_code != 200:
-            return {
-                "hasError": True,
-                "content": response.content
-            }
-            
-        supplier_name = getSupplierName(response.json()["product"]["id_supplier"])
-        
-        if supplier_name["hasError"]:
-            return {
-                "hasError": True,
-                "content": supplier_name["content"]
-            }
-        
-        return {
-            "hasError": False,
-            "content": supplier_name["content"]
-        }
 
 
 @mcp.tool()
@@ -222,28 +70,26 @@ def connectionToDB(command:str) -> dict:
             "content": f"❌ Error while connecting to MySQL: {e}"
         }
         
-
-@mcp.tool()
-def saveProducts(store: str,from_date: str, to_date: str, from_time="00:00:00", payment:str="all") -> dict:
-    """
-    Get orders details from store via API, and take products ids, names, quantities, and prices
-    then fetch products from database by id_product and take id_supplier from each product
-    then fetch it from pp_suppliers table (pp could be ps or other) and get the supplier name
-    then create a folder called "products" if not exist, inside it create csv file for each supplier, name it supplierName_todayDate(YYYY-MM-DD-HH-Min-Sec).csv and put their products, quantities and prices\n
-    NOTE: do not double the product name in the file , instead , add its quantity to the same previous one
-        it is better to give a feedback about this point, Ex : "i found another PRODUCT_NAME i will add its quantity to the previous one"
-    Args:
-        store: the given store name
-        from_date: The starting date (format: YYYY-MM-DD)
-        to_date: The ending date (format: YYYY-MM-DD) NOTE that the to_date is excluded
-        from_time: The starting time (format: "HH:MM:SS")
-        payment: payment mode (only cod and cmi, cod means cash on delivery, cmi means prepaid, all is the default means both)
-        current_states: list contains ids of orders status
-            list of status {ID:NAME} : { 2:"paiement accepte or received payment", 3: "preparation encours or not yet shipped"}
             
+@mcp.tool()
+def saveProducts(store: str,from_date: str, to_date: str, from_time:str="00:00:00", payment:str="all") -> dict:
+    """
+    Get orders from store via API using getOrders function with params\n
+    then get order details for each order using getOrderDetails function\n
+    then take products ids, names, quantities, and prices from order_rows\n
+    then get supplier id for each product by product id using getSupplierId function\n
+    then get supplier name by supplier id using getSupplierName function\n
+    then create a dict with supplier name as key and products data as value\n
+    finally, create a csv file for each supplier with their products data inside products folder\n
+   
+    NOTE: do not double the product name in the file , instead , add its quantity to the same previous one
+
+    Args:
+        See getOrders function for params description
     Returns:
         dict contains hasError and content keys, if successed hasError=False content=success message else hasError=True and content=error message
     """ 
+    data = {}
     
     orders = getOrders(store, from_date, to_date, [2,3], from_time, payment)
     
@@ -254,83 +100,74 @@ def saveProducts(store: str,from_date: str, to_date: str, from_time="00:00:00", 
             "feedback": "error in orders"
         }
     
-    if not orders:
+    if not orders["content"]:
         return {
             "hasError": False,
             "content": "No orders found"
         }
     
-    data = {}
-    
+    print(f"fetching {len(orders['content'])} orders..")
+        
     for order_id in orders["content"]:
+        print(f"fetching order {order_id}")
         order_details = getOrderDetails(store, order_id)
-        time.sleep(3)
         
         if order_details["hasError"]:
             return {
                 "hasError": True,
                 "content": order_details["content"],
-                "feedback": "error in orders details"
+                "feedback": f"error while fetching order details with id {order_id}"
             }
         
         for product in order_details["content"]["associations"]["order_rows"]:
-            supplier = connectionToDB(f"SELECT name FROM pp_supplier WHERE id_supplier = {product['product_id']}") #getProductSupplier(product["product_id"])
-            if supplier["hasError"]:
+            print(f"fetching supplier for product {product['product_name']}")
+            supplier_id = getSupplierId(store, product["product_id"])
+            
+            if supplier_id["hasError"]:
                 return {
                     "hasError": True,
-                    "content": supplier["content"],
-                    "feedback": "error in supplier name"
+                    "content": supplier_id["content"],
+                    "feedback": "error when fetching supplier id"
                 }
                 
-            supplier = "CDP" if supplier["content"] == "0" else supplier["content"]
+            supplier_name = getSupplierName(store, supplier_id["content"])
             
-            if supplier not in data:
-                data[supplier] = {}
-            
+            if supplier_name["hasError"]:
+                return {
+                    "hasError": True,
+                    "content": supplier_name["content"],
+                    "feedback": "error when fetching supplier name"
+                }
+                
             product_name = product["product_name"]
+            supplier_name = supplier_name["content"]   
+                 
+            if supplier_name not in data:
+                data[supplier_name] = {}
             
-            if product_name not in data[supplier]:
-                data[supplier][product_name] = {
+            if product_name not in data[supplier_name]:
+                data[supplier_name][product_name] = {
                     "quantity": int(product["product_quantity"]),
                     "price": product["product_price"][:-7]
                 }
             else:
-                data[supplier][product_name]["quantity"] += int(product["product_quantity"])
+                print(f"detected duplicate product {product_name}, adding quantity => ({product['product_quantity']}+{data[supplier_name][product_name]['quantity']})")
+                data[supplier_name][product_name]["quantity"] += int(product["product_quantity"])
            
-    createCSVFile(data)
+    result = createCSVFile(data)
     
+    if result["hasError"]:
+        return {
+            "hasError": True,
+            "content": result["content"],
+            "feedback": "error when creating csv files"
+        }
+        
     return {
         "hasError": False,
-        "content": "Products saved successfully"
+        "content": result["content"]
     }
-        
-        
-def createCSVFile(data:dict) -> None:
-    """
-    Create a csv file for the supplier and write the products data in it
-    Args:
-        data: the data to write in the csv file contains the supplier name and the products data
-    Returns:
-        None
-    """
     
-    if not os.path.exists("products"):
-        os.makedirs("products")
-        
-    
-    for supplier, product_data in data.items():
-        filename = f"products/{supplier}_{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.csv"
-        with open(filename, "w") as f:
-            writer = csv.writer(f)
-            writer.writerow(["Name", "Quantity", "Price"])
-            for product_name, product_data in product_data.items():
-                writer.writerow([product_name, product_data["quantity"], product_data["price"]])
-
-
-# resource
-
-# prompt
-
 
 if __name__ == "__main__":
-    mcp.run()
+    mcp.run(transport="stdio")

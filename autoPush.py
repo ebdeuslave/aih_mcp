@@ -4,4 +4,4 @@ def autoPush(commitMsg):
    print(os.system(f"git add . && git commit -m '{commitMsg}' && git push --force"))
    
    
-autoPush("upgrade to fastmcp 2")
+autoPush("refactoring")
