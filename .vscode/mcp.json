@@ -1,0 +1,20 @@
+{
+  "servers": {
+    "aih_mcp": {
+      "command": "/Users/ebdeu/Documents/Python/mcp/para_mcp/.venv/bin/fastmcp",
+      "args": [
+        "run",
+        "/Users/ebdeu/Documents/Python/mcp/para_mcp/server.py"
+      ]
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/ebdeu/Documents/Python/mcp/para_mcp",
+        "/Users/ebdeu/Desktop"
+      ]
+    }
+  }
+}

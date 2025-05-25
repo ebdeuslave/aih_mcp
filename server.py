@@ -1,42 +1,29 @@
 from fastmcp import FastMCP
-import os
-import webbrowser
 import mysql.connector
 from mysql.connector import Error
-from utils import createCSVFile
-from fetch_from_api import *
+from PrestashopAPI import PrestashopAPI
+from utils import createProductsFile
+import requests
+import os
 
+from dotenv import load_dotenv
+load_dotenv()
+API_KEY = os.getenv("api_key")
+SECURE_KEY = os.getenv("secure_key")
+available_stores = os.getenv("stores")
 
+ps = PrestashopAPI(API_KEY, SECURE_KEY, available_stores)     
+ 
 mcp = FastMCP("aih_mcp")
-
-
-@mcp.tool()
-def downloadInvoice(store:str, order_id:int) -> str|None:
-    """
-    Download the invoice PDF by opening the link in the browser
-    Args:
-        store: store name
-        id: order id
-    Returns:
-        404 message or None
-    """
-   
-    if store not in available_stores:
-        return f"Store {store} not found"
-        
-    url = f"https://{store}.ma/generatePDF.php?id_order={order_id}&secure_key={SECURE_KEY}"
-    
-    webbrowser.open(url)
-            
 
 @mcp.tool()
 def connectionToDB(command:str) -> dict:
     """
-    Connection to mysql database and fetch data\n
+    Connection to MySQL database and fetch data\n
     **IMPORTANT**:
         DO NOT TRY TO USE ANY COMMAND THAT UPDATE/DELETE RECORDS BECAUSE YOU CANNOT, YOU ARE ALLOWED TO ONLY FETCH DATA
     Args:
-        command: the command to run in mysql (IMPORTANT: DO NOT END COMMAND WITH ";" MYSQL CONNECTOR HANDLES THAT AUTOMATICALY)
+        command: the command to run in mysql (IMPORTANT: DO NOT END COMMAND WITH ";" MYSQL CONNECTOR HANDLES THAT AUTOMATICALLY)
     Returns:
         dict contains hasError and content keys, if successed hasError=False content=list of fetched data else hasError=True and content=error message
     """
@@ -64,13 +51,71 @@ def connectionToDB(command:str) -> dict:
                 "content": fetched_data
             }
 
-    except Error as e:
+    except Error as error:
         return {
             "hasError": True,
-            "content": f"❌ Error while connecting to MySQL: {e}"
+            "content": f"❌ Error: {error}"
         }
         
-            
+        
+@mcp.tool()
+def downloadInvoices(store: str, from_date: str, to_date: str, from_time:str="00:00:00", payment:str="all") -> dict:
+    """
+    Get orders ids from store via API using getOrders function with params\n
+    then download each invoice and save it in invoices folder\n
+    
+    Args:
+        See getOrders function for params description
+    Returns:
+        dict contains hasError and content keys, if successed hasError=False content=success message else hasError=True and content=error message
+    """ 
+    orders = ps.getOrders(store, from_date, to_date, [2,3], from_time, payment)
+    
+    if orders["hasError"]:
+        return {
+            "hasError": True,
+            "content": orders["content"],
+            "feedback": "error in orders"
+        }
+    
+    if not orders["content"]:
+        return {
+            "hasError": False,
+            "content": "No orders found"
+        }
+    
+    print(f"fetching {len(orders['content'])} orders..")
+    
+    failed_to_download = []
+    
+    for order_id in orders["content"]:
+        print(f"downloading invoice for order {order_id}")
+        # NOTE that the invoice generator URL is not an officiel Prestashop URL
+        url = f"https://{store}.ma/generatePDF.php?id_order={order_id}&secure_key={SECURE_KEY}"
+        pdf_response = requests.get(url)
+        if pdf_response.status_code != 200 or pdf_response.headers.get('Content-Type') != 'application/pdf':
+            print(f"❌ Failed to download invoice for order {order_id}")
+            failed_to_download.append(order_id)
+            continue
+        
+        if not os.path.exists("invoices"): os.makedirs("invoices")
+        filename = f"invoices/{store}_{order_id}.pdf"
+        with open(filename, "wb") as f:
+            f.write(pdf_response.content)
+        
+    if failed_to_download:
+        return {
+            "hasError": True,
+            "content": f"❌ Failed to download invoices for orders: {failed_to_download}",
+            "feedback": "some invoices failed to download"
+        }    
+        
+    return {
+        "hasError": False,
+        "content": "Invoices downloaded successfully"
+    }
+    
+    
 @mcp.tool()
 def saveProducts(store: str,from_date: str, to_date: str, from_time:str="00:00:00", payment:str="all") -> dict:
     """
@@ -91,7 +136,7 @@ def saveProducts(store: str,from_date: str, to_date: str, from_time:str="00:00:0
     """ 
     data = {}
     
-    orders = getOrders(store, from_date, to_date, [2,3], from_time, payment)
+    orders = ps.getOrders(store, from_date, to_date, [2,3], from_time, payment)
     
     if orders["hasError"]:
         return {
@@ -110,7 +155,7 @@ def saveProducts(store: str,from_date: str, to_date: str, from_time:str="00:00:0
         
     for order_id in orders["content"]:
         print(f"fetching order {order_id}")
-        order_details = getOrderDetails(store, order_id)
+        order_details = ps.getOrderDetails(store, order_id)
         
         if order_details["hasError"]:
             return {
@@ -121,7 +166,7 @@ def saveProducts(store: str,from_date: str, to_date: str, from_time:str="00:00:0
         
         for product in order_details["content"]["associations"]["order_rows"]:
             print(f"fetching supplier for product {product['product_name']}")
-            supplier_id = getSupplierId(store, product["product_id"])
+            supplier_id = ps.getSupplierId(store, product["product_id"])
             
             if supplier_id["hasError"]:
                 return {
@@ -130,7 +175,7 @@ def saveProducts(store: str,from_date: str, to_date: str, from_time:str="00:00:0
                     "feedback": "error when fetching supplier id"
                 }
                 
-            supplier_name = getSupplierName(store, supplier_id["content"])
+            supplier_name = ps.getSupplierName(store, supplier_id["content"])
             
             if supplier_name["hasError"]:
                 return {
@@ -154,7 +199,7 @@ def saveProducts(store: str,from_date: str, to_date: str, from_time:str="00:00:0
                 print(f"detected duplicate product {product_name}, adding quantity => ({product['product_quantity']}+{data[supplier_name][product_name]['quantity']})")
                 data[supplier_name][product_name]["quantity"] += int(product["product_quantity"])
            
-    result = createCSVFile(data)
+    result = createProductsFile(data)
     
     if result["hasError"]:
         return {
@@ -168,6 +213,5 @@ def saveProducts(store: str,from_date: str, to_date: str, from_time:str="00:00:0
         "content": result["content"]
     }
     
-
 if __name__ == "__main__":
     mcp.run(transport="stdio")
